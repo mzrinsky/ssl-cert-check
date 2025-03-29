@@ -299,6 +299,12 @@ QUIET="FALSE"
 # Don't send E-mail by default (cmdline: -a)
 ALARM="FALSE"
 
+# Skip sending an E-mail.. (cmdline: -e to enable emails)
+NOMAIL="TRUE"
+# Send an alert via. discord webhook.. (cmdline: -d and -w url)
+DISCORD="FALSE"
+DISCORD_WEBHOOK_URL=""
+
 # Don't run as a Nagios plugin by default (cmdline: -n)
 NAGIOS="FALSE"
 
@@ -313,6 +319,7 @@ CERTTYPE="pem"
 
 # Location of system binaries
 AWK=$(command -v awk)
+CURL=$(command -v curl)
 DATE=$(command -v date)
 GREP=$(command -v grep)
 OPENSSL=$(command -v openssl)
@@ -377,6 +384,19 @@ cleanup() {
 
 
 #####################################################
+### Send discord
+### Accepts one parameter:
+###  $1 -> Message
+#####################################################
+send_discord() {
+
+  local MESSAGE="$1"
+
+  ${CURL} --silent -i -H "Accept: application/json" -H "Content-Type:application/json" -X POST --data "{\"content\":\"${MESSAGE}\"}" ${DISCORD_WEBHOOK_URL} 2>&1 >/dev/null
+}
+
+
+#####################################################
 ### Send email
 ### Accepts three parameters:
 ###  $1 -> sender email address
@@ -408,6 +428,30 @@ send_mail() {
             ;;
     esac
 }
+
+
+#####################################################
+### Send alerts
+### Purpose: Wrap the alert sending logic, so it is transport independent.
+### Accepts one parameter:
+###  $1 -> Message
+###  $1 -> Subject
+#####################################################
+send_alerts() {
+
+  local MESSAGE="$1"
+  local SUBJECT="$2"
+
+  if [ "${NOMAIL}" != "TRUE" ]; then
+    # send an email..
+    send_mail "${SENDER}" "${ADMIN}" "${SUBJECT}" "${MESSAGE}"
+  fi
+
+  if [ "${DISCORD}" == "TRUE" ]; then
+    send_discord "${MESSAGE}"
+  fi
+}
+
 
 #############################################################################
 # Purpose: Convert a date from MONTH-DAY-YEAR to Julian format
@@ -615,10 +659,13 @@ set_summary()
 ##########################################
 usage()
 {
-    echo "Usage: $0 [ -e email address ] [-E sender email address] [ -x days ] [-q] [-a] [-b] [-h] [-i] [-n] [-N] [-v]"
+    echo "Usage: $0 [ -e email address ] [-E sender email address] [ -x days ] [-q] [-a] [-b] [-D] [-h] [-i] [-n] [-N] [-o] [-v] [ -w url ]"
     echo "       { [ -s common_name ] && [ -p port] } || { [ -f cert_file ] } || { [ -c cert file ] } || { [ -d cert dir ] }"
     echo ""
-    echo "  -a                : Send a warning message through E-mail"
+    echo "  -a                : Send a warning alert message"
+    echo "  -o                : Send alert message through E-mail"
+    echo "  -D                : Send alert message through Discord"
+    echo "  -w url            : Discord Webhook URL to send message to"
     echo "  -b                : Will not print header"
     echo "  -c cert file      : Print the expiration date for the PEM or PKCS12 formatted certificate in cert file"
     echo "  -d cert directory : Print the expiration date for the PEM or PKCS12 formatted certificates in cert directory"
@@ -776,8 +823,8 @@ check_file_status() {
 
     if [ "${CERTDIFF}" -lt 0 ]; then
         if [ "${ALARM}" = "TRUE" ]; then
-            send_mail "${SENDER}" "${ADMIN}" "Certificate for ${HOST} \"(CN: ${COMMONNAME})\" has expired!" \
-                "The SSL certificate for ${HOST} \"(CN: ${COMMONNAME})\" has expired!"
+            send_alerts "The SSL certificate for ${HOST} '(CN: ${COMMONNAME})' has expired!" \
+            "Certificate for ${HOST} '(CN: ${COMMONNAME})' has expired!"
         fi
 
         prints "${HOST}" "${PORT}" "Expired" "${CERTDATE}" "${CERTDIFF}" "${CERTISSUER}" "${COMMONNAME}" "${SERIAL}"
@@ -785,8 +832,8 @@ check_file_status() {
 
     elif [ "${CERTDIFF}" -lt "${WARNDAYS}" ]; then
         if [ "${ALARM}" = "TRUE" ]; then
-            send_mail "${SENDER}" "${ADMIN}" "Certificate for ${HOST} \"(CN: ${COMMONNAME})\" will expire in ${CERTDIFF} days or less" \
-                "The SSL certificate for ${HOST} \"(CN: ${COMMONNAME})\" will expire on ${CERTDATE}"
+            send_alerts "The SSL certificate for ${HOST} '(CN: ${COMMONNAME})' will expire on ${CERTDATE}" \
+            "Certificate for ${HOST} '(CN: ${COMMONNAME})' will expire in ${CERTDIFF} days or less"
         fi
         prints "${HOST}" "${PORT}" "Expiring" "${CERTDATE}" "${CERTDIFF}" "${CERTISSUER}" "${COMMONNAME}" "${SERIAL}"
         RETCODE_LOCAL=1
@@ -804,13 +851,16 @@ check_file_status() {
 #################################
 ### Start of main program
 #################################
-while getopts abc:d:e:E:f:hik:nNp:qs:St:Vx: option
+while getopts abc:d:De:E:f:hik:nNop:qs:St:Vx:w: option
 do
     case "${option}" in
         a) ALARM="TRUE";;
         b) NOHEADER="TRUE";;
         c) CERTFILE=${OPTARG};;
+        o) NOEMAIL="FALSE";;
         d) CERTDIRECTORY=${OPTARG};;
+        D) DISCORD="TRUE";;
+        w) DISCORD_WEBHOOK_URL=${OPTARG};;
         e) ADMIN=${OPTARG};;
         E) SENDER=${OPTARG};;
         f) SERVERFILE=$OPTARG;;
@@ -871,9 +921,23 @@ if [ ! -f "${SED}" ] || [ ! -f "${AWK}" ]; then
 fi
 
 ### Check to make sure a mail client is available it automated notifications are requested
-if [ "${ALARM}" = "TRUE" ] && [ ! -f "${MAIL}" ]; then
+if [ "${ALARM}" == "TRUE" ] && [ "${NOMAIL}" == "FALSE" ] && [ ! -f "${MAIL}" ]; then
     echo "ERROR: You enabled automated alerts, but the mail binary could not be found."
     echo "FIX: Please modify the ${MAIL} variable in the program header."
+    exit 1
+fi
+
+### Check to make sure curl utility is available when using discord
+if [ "${ALARM}" == "TRUE" ] && [ "${DISCORD}" == "TRUE" ] && [ ! -f "${CURL}" ]; then
+    echo "ERROR: The curl binary does not exist in ${CURL}."
+    echo "FIX: Please modify the \${CURL} variable in the program header."
+    exit 1
+fi
+
+### Check to make sure discord webhook url is set if discord notifications are reqeusted
+if [ "${ALARM}" == "TRUE" ] && [ "${DISCORD}" == "TRUE" ] && [ "${DISCORD_WEBHOOK_URL}" == "" ]; then
+    echo "ERROR: You enabled automated discord alerts, but the discord webhook url was not set."
+    echo "FIX: Please modify the ${DISCORD_WEBHOOK_URL} variable in the program header."
     exit 1
 fi
 
