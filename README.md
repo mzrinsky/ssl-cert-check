@@ -5,10 +5,13 @@ ssl-cert-check is a Bourne shell script that can be used to report on expiring S
 # Usage:
 <pre>
 $ ./ssl-cert-check
-Usage: ./ssl-cert-check [ -e email address ] [ -E sender email address ] [ -x days ] [-q] [-a] [-b] [-h] [-i] [-n] [-N] [-v]
+Usage: ./ssl-cert-check [ -e email address ] [ -E sender email address ] [ -x days ] [-q] [-a] [-b] [-h] [-i] [-n] [-N] [-v] [-D] [-o] [ -w webhook url ]
        { [ -s common_name ] && [ -p port] } || { [ -f cert_file ] } || { [ -c cert file ] } || { [ -d cert dir ] }"
 
-  -a                : Send a warning message through E-mail
+  -a                : Send a warning message
+  -o                : Send a warning message through E-mail
+  -D                : Send a warning message through Discord
+  -w url            : The Discord webhook url to send to
   -b                : Will not print header
   -c cert file      : Print the expiration date for the PEM or PKCS12 formatted certificate in cert file
   -d cert directory : Print the expiration date for the PEM or PKCS12 formatted certificates in cert directory
