@@ -442,7 +442,7 @@ send_alerts() {
   local MESSAGE="$1"
   local SUBJECT="$2"
 
-  if [ "${NOMAIL}" != "TRUE" ]; then
+  if [ "${NOMAIL}" == "FALSE" ]; then
     # send an email..
     send_mail "${SENDER}" "${ADMIN}" "${SUBJECT}" "${MESSAGE}"
   fi
@@ -857,7 +857,7 @@ do
         a) ALARM="TRUE";;
         b) NOHEADER="TRUE";;
         c) CERTFILE=${OPTARG};;
-        o) NOEMAIL="FALSE";;
+        o) NOMAIL="FALSE";;
         d) CERTDIRECTORY=${OPTARG};;
         D) DISCORD="TRUE";;
         w) DISCORD_WEBHOOK_URL=${OPTARG};;
